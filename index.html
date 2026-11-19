@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  Spike: a page on ANOTHER origin that reaches the panel's scorer the way a peer agent site's
+  runtime does: registerRemoteActions() reads the catalog through one hidden bridge frame,
+  then each execute opens a new hidden frame. ?target=<panel origin>&runs=N
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Bridge spike caller</title>
+    <script type="module">
+      import { ActionRegistry } from "./runtime/actions.js";
+      import { registerRemoteActions } from "./runtime/action-transport.js";
+      const params = new URLSearchParams(location.search);
+      const target = params.get("target");
+      const runs = Number(params.get("runs") || 2);
+      const out = { target, caller: location.origin, runs: [] };
+      try {
+        const manifest = await (await fetch(`${target}/agent-manifest.json`)).json();
+        const registry = new ActionRegistry();
+        const scope = { base: target, network: manifest.networks[0].name };
+        let t = performance.now();
+        await registerRemoteActions(registry, scope, manifest);
+        out.catalogMs = Math.round(performance.now() - t);
+        out.catalog = registry.catalog(scope).map(({ name, effect, availability }) => ({ name, effect, availability }));
+        out.discoveryIssues = registry.discoveryIssues;
+        const entry = [...registry.entries.values()].find((e) => e.name === "score_reactions");
+        const input = await (await fetch("./data/sample-input.json")).json();
+        for (let i = 0; i < runs; i++) {
+          t = performance.now();
+          try {
+            const value = await entry.execute(input, { requestId: `spike-${Date.now()}-${i}` });
+            out.runs.push({ ms: Math.round(performance.now() - t), value });
+          } catch (error) {
+            out.runs.push({ ms: Math.round(performance.now() - t), error: String(error.message || error) });
+          }
+        }
+      } catch (error) {
+        out.error = String(error.stack || error);
+      }
+      window.__spike = out;
+      document.body.textContent = "done";
+    </script>
+  </head>
+  <body>running</body>
+</html>
